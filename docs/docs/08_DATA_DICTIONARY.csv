@@ -1,0 +1,13 @@
+field,ten_tieng_viet,bat_buoc,vi_tri_mau,mo_ta,ghi_chu
+pile_no,Số cọc,Không,Top rows / column L,Mã cọc,Đọc từ metadata nếu có
+target_depth,Độ sâu mục tiêu,Có,Top rows,Độ sâu mục tiêu thiết kế,Parse từ chuỗi như 13.66m
+diameter,Đường kính cọc,Không,Top rows,Đường kính cọc,Parse từ 1800mm
+header_drill_depth,Khoan sâu,Không,Top rows,Khoan sâu ghi trong header,Có thể khác max độ sâu thực tế
+actual_drill_depth,Khoan sâu thực tế,Có,Max cột Độ sâu,Độ sâu lớn nhất trong dữ liệu,Nên dùng để nhận diện peak
+depth,Độ sâu,Có,Cột C,Độ sâu từng thời điểm,Dùng tính VX/VL
+flow_segment,Lưu lượng đoạn,Có,Cột F,Lưu lượng từng đoạn,Dùng tính LLV
+main_hoist_speed,Tốc độ Tời chính,Có,Cột H,Tốc độ tời chính,Dùng tính VX/VL
+cd_dinh,CĐ đỉnh,Có,Kết quả bên phải,Target depth - drill length,Tính lại
+llv,LLV,Có,Kết quả bên phải,Tổng lưu lượng vùng phun chính,Tính theo flow_segment
+vx,VX,Có,Kết quả bên phải,Trung bình tốc độ tời khi xuống,Tính theo main_hoist_speed
+vl,VL,Có,Kết quả bên phải,Trung bình tốc độ tời khi lên,Tính theo main_hoist_speed
