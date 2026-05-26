@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -18,11 +20,13 @@ from utils import (
     find_result_anchor,
     is_sheet_effectively_empty,
     make_output_path,
+    normalize_text,
     parse_number,
 )
 
 LogCallback = Callable[[str], None] | None
 ProgressCallback = Callable[[int, str], None] | None
+NUMERIC_CELL_PATTERN = re.compile(r"^-?\d+(?:[\.,]\d+)?$")
 
 
 class ExcelProcessor:
@@ -42,11 +46,11 @@ class ExcelProcessor:
         workbook = load_workbook(input_path)
         results: list[SheetResult] = []
 
-        worksheets = list(workbook.worksheets)
-        total_sheets = max(len(worksheets), 1)
-
         if self.config.create_summary_sheet and "Tong_hop" in workbook.sheetnames:
             del workbook["Tong_hop"]
+
+        worksheets = list(workbook.worksheets)
+        total_sheets = max(len(worksheets), 1)
 
         for index, worksheet in enumerate(worksheets, start=1):
             self._report_progress(progress_callback, index - 1, total_sheets, f"Đang xử lý {worksheet.title}...")
@@ -67,6 +71,118 @@ class ExcelProcessor:
         if log_callback:
             log_callback(f"Đã lưu file kết quả: {output_path}")
         return output_path, results
+
+    def process_csv_files(
+        self,
+        csv_paths: list[str | Path],
+        output_dir: str | Path,
+        drill_length: float,
+        progress_callback: ProgressCallback = None,
+        log_callback: LogCallback = None,
+    ) -> tuple[Path, list[SheetResult]]:
+        paths = [Path(path) for path in csv_paths]
+        if not paths:
+            raise ValueError("Chưa chọn file CSV.")
+
+        output_dir = Path(output_dir)
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+        results: list[SheetResult] = []
+        total_files = max(len(paths), 1)
+
+        for index, csv_path in enumerate(paths, start=1):
+            self._report_progress(progress_callback, index - 1, total_files, f"Đang đọc {csv_path.name}...")
+            rows = self._read_csv_rows(csv_path)
+            sheet_title = self._build_csv_sheet_title(csv_path, rows, workbook.sheetnames)
+            worksheet = workbook.create_sheet(sheet_title)
+            self._write_csv_rows_to_sheet(worksheet, rows)
+            result = self._process_sheet(worksheet, drill_length, log_callback)
+            results.append(result)
+            self._report_progress(progress_callback, index, total_files, f"Đã xử lý {csv_path.name}")
+
+        if self.config.create_summary_sheet:
+            self._write_summary_sheet(workbook, results)
+
+        base_stem = paths[0].stem if len(paths) == 1 else "csv_tong_hop"
+        output_path = self._make_xlsx_output_path(output_dir, base_stem)
+        workbook.save(output_path)
+        if log_callback:
+            log_callback(f"Đã lưu file kết quả: {output_path}")
+        return output_path, results
+
+    def _read_csv_rows(self, csv_path: Path) -> list[list[str]]:
+        last_decode_error: UnicodeDecodeError | None = None
+        for encoding in ("utf-8-sig", "utf-8", "cp1258", "cp1252"):
+            try:
+                with csv_path.open("r", encoding=encoding, newline="") as file_obj:
+                    sample = file_obj.read(4096)
+                    file_obj.seek(0)
+                    try:
+                        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+                    except csv.Error:
+                        dialect = csv.excel
+                    return [row for row in csv.reader(file_obj, dialect)]
+            except UnicodeDecodeError as exc:
+                last_decode_error = exc
+        raise ValueError(f"Không đọc được encoding CSV: {csv_path.name}") from last_decode_error
+
+    def _write_csv_rows_to_sheet(self, worksheet: Worksheet, rows: list[list[str]]) -> None:
+        for row_idx, row in enumerate(rows, start=1):
+            for col_idx, value in enumerate(row, start=1):
+                worksheet.cell(row_idx, col_idx, self._coerce_csv_cell_value(value))
+
+    def _coerce_csv_cell_value(self, value: str) -> str | int | float | None:
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if not NUMERIC_CELL_PATTERN.fullmatch(stripped):
+            return value
+        normalized = stripped.replace(",", ".")
+        number_value = float(normalized)
+        if number_value.is_integer() and "." not in normalized:
+            return int(number_value)
+        return number_value
+
+    def _build_csv_sheet_title(
+        self,
+        csv_path: Path,
+        rows: list[list[str]],
+        existing_titles: list[str],
+    ) -> str:
+        pile_no = self._extract_csv_pile_no(rows)
+        base_title = pile_no or csv_path.stem
+        cleaned = "".join("_" if char in r'[]:*?/\\' else char for char in base_title).strip()
+        cleaned = cleaned or "CSV"
+        cleaned = cleaned[:31]
+
+        title = cleaned
+        counter = 1
+        while title in existing_titles:
+            suffix = f"_{counter}"
+            title = f"{cleaned[:31 - len(suffix)]}{suffix}"
+            counter += 1
+        return title
+
+    def _extract_csv_pile_no(self, rows: list[list[str]]) -> str | None:
+        for row in rows[:10]:
+            for col_idx, value in enumerate(row):
+                if normalize_text(value) == "so coc" and col_idx + 1 < len(row):
+                    pile_value = row[col_idx + 1]
+                    if pile_value not in (None, ""):
+                        return str(pile_value).strip()
+        return None
+
+    def _make_xlsx_output_path(self, output_dir: Path, base_stem: str) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{base_stem}{self.config.output_suffix}.xlsx"
+        if not self.config.do_not_overwrite_original:
+            return output_path
+
+        counter = 1
+        while output_path.exists():
+            output_path = output_dir / f"{base_stem}{self.config.output_suffix}_{counter}.xlsx"
+            counter += 1
+        return output_path
 
     def _process_sheet(
         self,

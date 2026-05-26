@@ -34,22 +34,31 @@ class ProcessorWorker(QObject):
     finished = pyqtSignal(str, list)
     failed = pyqtSignal(str)
 
-    def __init__(self, input_path: str, output_dir: str, config: RuntimeConfig) -> None:
+    def __init__(self, input_paths: list[str], output_dir: str, config: RuntimeConfig) -> None:
         super().__init__()
-        self.input_path = input_path
+        self.input_paths = input_paths
         self.output_dir = output_dir
         self.config = config
 
     def run(self) -> None:
         try:
             processor = ExcelProcessor(self.config)
-            output_path, results = processor.process_workbook(
-                input_path=self.input_path,
-                output_dir=self.output_dir,
-                drill_length=self.config.default_drill_length_m,
-                progress_callback=self.progress.emit,
-                log_callback=self.log.emit,
-            )
+            if len(self.input_paths) == 1 and self.input_paths[0].lower().endswith(".xlsx"):
+                output_path, results = processor.process_workbook(
+                    input_path=self.input_paths[0],
+                    output_dir=self.output_dir,
+                    drill_length=self.config.default_drill_length_m,
+                    progress_callback=self.progress.emit,
+                    log_callback=self.log.emit,
+                )
+            else:
+                output_path, results = processor.process_csv_files(
+                    csv_paths=self.input_paths,
+                    output_dir=self.output_dir,
+                    drill_length=self.config.default_drill_length_m,
+                    progress_callback=self.progress.emit,
+                    log_callback=self.log.emit,
+                )
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
             return
@@ -67,8 +76,10 @@ class MainWindow(QMainWindow):
         self.last_output_path: str | None = None
         self.thread: QThread | None = None
         self.worker: ProcessorWorker | None = None
+        self.input_paths: list[str] = []
 
         self.file_edit = QLineEdit()
+        self.file_edit.setReadOnly(True)
         self.output_edit = QLineEdit(str(Path.cwd()))
         self.drill_length_spin = QDoubleSpinBox()
         self.drill_length_spin.setRange(0.01, 999.0)
@@ -109,13 +120,18 @@ class MainWindow(QMainWindow):
         file_button.clicked.connect(self.choose_file)
         self.file_button = file_button
 
+        csv_folder_button = QPushButton("Chọn thư mục CSV")
+        csv_folder_button.clicked.connect(self.choose_csv_folder)
+        self.csv_folder_button = csv_folder_button
+
         output_button = QPushButton("Chọn thư mục")
         output_button.clicked.connect(self.choose_output_dir)
         self.output_button = output_button
 
-        form_layout.addWidget(QLabel("File Excel:"), 0, 0)
+        form_layout.addWidget(QLabel("File Excel / CSV:"), 0, 0)
         form_layout.addWidget(self.file_edit, 0, 1)
         form_layout.addWidget(file_button, 0, 2)
+        form_layout.addWidget(csv_folder_button, 0, 3)
 
         form_layout.addWidget(QLabel("Độ dài mũi khoan:"), 1, 0)
         form_layout.addWidget(self.drill_length_spin, 1, 1)
@@ -150,11 +166,29 @@ class MainWindow(QMainWindow):
         self.open_output_button.clicked.connect(self.open_output_file)
 
     def choose_file(self) -> None:
-        file_path, _ = QFileDialog.getOpenFileName(self, "Chọn file Excel", str(Path.cwd()), "Excel Files (*.xlsx)")
-        if file_path:
-            self.file_edit.setText(file_path)
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Chọn file Excel hoặc CSV",
+            str(Path.cwd()),
+            "Excel/CSV Files (*.xlsx *.csv);;Excel Files (*.xlsx);;CSV Files (*.csv)",
+        )
+        if file_paths:
+            self.input_paths = file_paths
+            self.file_edit.setText(self._format_input_display(file_paths))
             if not self.output_edit.text().strip():
-                self.output_edit.setText(str(Path(file_path).parent))
+                self.output_edit.setText(str(Path(file_paths[0]).parent))
+
+    def choose_csv_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục chứa CSV", self.output_edit.text().strip() or str(Path.cwd()))
+        if not folder:
+            return
+        csv_paths = sorted(str(path) for path in Path(folder).glob("*.csv"))
+        if not csv_paths:
+            QMessageBox.warning(self, "Không có CSV", "Thư mục đã chọn không có file .csv.")
+            return
+        self.input_paths = csv_paths
+        self.file_edit.setText(self._format_input_display(csv_paths))
+        self.output_edit.setText(folder)
 
     def choose_output_dir(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu", self.output_edit.text().strip() or str(Path.cwd()))
@@ -162,9 +196,8 @@ class MainWindow(QMainWindow):
             self.output_edit.setText(folder)
 
     def start_processing(self) -> None:
-        input_path = self.file_edit.text().strip()
         output_dir = self.output_edit.text().strip()
-        validation_error = self._validate_inputs(input_path, output_dir)
+        validation_error = self._validate_inputs(self.input_paths, output_dir)
         if validation_error:
             QMessageBox.warning(self, "Thiếu thông tin", validation_error)
             return
@@ -184,7 +217,7 @@ class MainWindow(QMainWindow):
         runtime_config.include_flow_equal_threshold = self.include_equal_checkbox.isChecked()
 
         self.thread = QThread(self)
-        self.worker = ProcessorWorker(input_path, output_dir, runtime_config)
+        self.worker = ProcessorWorker(self.input_paths, output_dir, runtime_config)
         self.worker.moveToThread(self.thread)
 
         self.thread.started.connect(self.worker.run)
@@ -197,13 +230,17 @@ class MainWindow(QMainWindow):
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.start()
 
-    def _validate_inputs(self, input_path: str, output_dir: str) -> str | None:
-        if not input_path:
-            return "Hãy chọn file Excel."
-        if not input_path.lower().endswith(".xlsx"):
-            return "File đầu vào phải là .xlsx."
-        if not Path(input_path).exists():
-            return "File Excel không tồn tại."
+    def _validate_inputs(self, input_paths: list[str], output_dir: str) -> str | None:
+        if not input_paths:
+            return "Hãy chọn file Excel hoặc CSV."
+        suffixes = {Path(path).suffix.lower() for path in input_paths}
+        if ".xlsx" in suffixes and (len(input_paths) > 1 or suffixes != {".xlsx"}):
+            return "Chỉ chọn 1 file Excel, hoặc chọn nhiều file CSV. Không trộn Excel và CSV."
+        if suffixes not in ({".xlsx"}, {".csv"}):
+            return "File đầu vào phải là .xlsx hoặc .csv."
+        missing_paths = [path for path in input_paths if not Path(path).exists()]
+        if missing_paths:
+            return f"File không tồn tại: {missing_paths[0]}"
         if self.drill_length_spin.value() <= 0:
             return "Độ dài mũi khoan phải lớn hơn 0."
         if not output_dir:
@@ -215,6 +252,7 @@ class MainWindow(QMainWindow):
     def _set_busy(self, busy: bool) -> None:
         self.process_button.setEnabled(not busy)
         self.file_button.setEnabled(not busy)
+        self.csv_folder_button.setEnabled(not busy)
         self.output_button.setEnabled(not busy)
 
     def on_progress(self, percent: int, message: str) -> None:
@@ -253,3 +291,9 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_path)))
         else:
             QMessageBox.warning(self, "Không tìm thấy file", "File kết quả không còn tồn tại.")
+
+    def _format_input_display(self, input_paths: list[str]) -> str:
+        if len(input_paths) == 1:
+            return input_paths[0]
+        first_path = Path(input_paths[0])
+        return f"{len(input_paths)} file CSV - {first_path.parent}"

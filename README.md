@@ -13,6 +13,7 @@ Sau khi xử lý, app sẽ:
 - tô màu range dùng để tính
 - tạo sheet tổng hợp `Tong_hop`
 - xuất ra file Excel mới, không ghi đè file gốc
+- hỗ trợ xử lý trực tiếp 1 hoặc nhiều file CSV thô và gom ra 1 file Excel kết quả
 
 ## Cấu trúc project
 
@@ -54,11 +55,26 @@ python main.py
 
 ## Cách dùng
 
-1. Chọn file Excel `.xlsx`.
+1. Chọn file Excel `.xlsx`, hoặc chọn nhiều file CSV, hoặc chọn thư mục chứa CSV.
 2. Nhập độ dài mũi khoan, mặc định `3.00m`.
 3. Chọn thư mục lưu.
 4. Bấm `Phân tích & Xuất file`.
 5. Kiểm tra bảng kết quả trên giao diện và file Excel output.
+
+## Xử lý CSV thô
+
+Nếu dữ liệu gốc là nhiều file `.csv`, không cần dùng Excel Get Data để gom thủ công.
+
+- Bấm `Chọn file` để chọn một hoặc nhiều file `.csv`.
+- Hoặc bấm `Chọn thư mục CSV` để lấy tất cả file `.csv` trong thư mục đó.
+- App sẽ tạo một workbook `.xlsx`, mỗi CSV thành một sheet riêng.
+- Sheet `Tong_hop` tổng hợp kết quả tất cả CSV.
+
+Lưu ý:
+
+- Không trộn file `.xlsx` và `.csv` trong cùng một lần xử lý.
+- Nếu chọn Excel thì chỉ chọn một file `.xlsx`.
+- CSV cần có metadata và header giống mẫu: `Số cọc`, `Độ sâu mục tiêu`, `Độ sâu`, `Lưu lượng đoạn`, `Tốc độ Tời chính`.
 
 ## Test bằng file mẫu
 
