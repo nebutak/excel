@@ -44,6 +44,18 @@ def calculate_sheet(
         raise CalculationError("Không đủ dữ liệu để tính VL.")
 
     llv_start_idx, llv_end_idx, llv = calculate_llv_range(rows, vx_start_idx, vl_start_idx, config)
+    injection_start_depth = rows[llv_start_idx].depth if llv_end_idx >= llv_start_idx else None
+    actual_top_elevation = calculate_actual_top_elevation(
+        design_top_elevation=config.default_design_top_elevation,
+        cd_dinh=cd_dinh,
+        injection_start_depth=injection_start_depth,
+    )
+    actual_bottom_elevation = calculate_actual_bottom_elevation(
+        design_bottom_elevation=config.default_design_bottom_elevation,
+        actual_drill_depth=actual_drill_depth,
+        target_depth=target_depth,
+    )
+    actual_column_length = actual_top_elevation - actual_bottom_elevation
 
     notes: list[str] = []
     if llv_end_idx < llv_start_idx:
@@ -54,6 +66,9 @@ def calculate_sheet(
         llv=llv,
         vx=round(vx, 6),
         vl=round(vl, 6),
+        actual_top_elevation=round(actual_top_elevation, 6),
+        actual_bottom_elevation=round(actual_bottom_elevation, 6),
+        actual_column_length=round(actual_column_length, 6),
         vx_start_idx=vx_start_idx,
         vx_end_idx=vx_end_idx,
         vl_start_idx=vl_start_idx,
@@ -61,6 +76,7 @@ def calculate_sheet(
         llv_start_idx=llv_start_idx,
         llv_end_idx=llv_end_idx,
         actual_drill_depth=actual_drill_depth,
+        injection_start_depth=injection_start_depth,
         notes=notes,
     )
 
@@ -174,3 +190,21 @@ def calculate_llv_range(
     if llv_start_idx == -1:
         return 0, -1, 0.0
     return llv_start_idx, llv_end_idx, round(llv_total, 6)
+
+
+def calculate_actual_top_elevation(
+    design_top_elevation: float,
+    cd_dinh: float,
+    injection_start_depth: float | None,
+) -> float:
+    if injection_start_depth is not None and injection_start_depth < cd_dinh:
+        return design_top_elevation + (cd_dinh - injection_start_depth)
+    return design_top_elevation
+
+
+def calculate_actual_bottom_elevation(
+    design_bottom_elevation: float,
+    actual_drill_depth: float,
+    target_depth: float,
+) -> float:
+    return design_bottom_elevation - (actual_drill_depth - target_depth)

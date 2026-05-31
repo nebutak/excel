@@ -41,6 +41,9 @@ class SheetCalculation:
     llv: float
     vx: float
     vl: float
+    actual_top_elevation: float
+    actual_bottom_elevation: float
+    actual_column_length: float
     vx_start_idx: int
     vx_end_idx: int
     vl_start_idx: int
@@ -48,6 +51,7 @@ class SheetCalculation:
     llv_start_idx: int
     llv_end_idx: int
     actual_drill_depth: float
+    injection_start_depth: float | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -59,10 +63,15 @@ class SheetResult:
     header_drill_depth: float | None
     actual_drill_depth: float | None
     drill_length: float
+    design_top_elevation: float
+    design_bottom_elevation: float
     cd_dinh: float | None
     llv: float | None
     vx: float | None
     vl: float | None
+    actual_top_elevation: float | None
+    actual_bottom_elevation: float | None
+    actual_column_length: float | None
     vx_range: str | None
     vl_range: str | None
     llv_range: str | None
@@ -77,6 +86,9 @@ class SheetResult:
             "" if self.llv is None else f"{self.llv:.2f}",
             "" if self.vx is None else f"{self.vx:.4f}",
             "" if self.vl is None else f"{self.vl:.4f}",
+            "" if self.actual_top_elevation is None else f"{self.actual_top_elevation:.2f}",
+            "" if self.actual_bottom_elevation is None else f"{self.actual_bottom_elevation:.2f}",
+            "" if self.actual_column_length is None else f"{self.actual_column_length:.2f}",
             self.status,
             self.note,
         ]

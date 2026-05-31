@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt5.QtCore import QObject, QThread, pyqtSignal
+from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -26,6 +29,7 @@ from PyQt5.QtCore import QUrl
 
 from config import DEFAULT_CONFIG, RuntimeConfig, clone_config
 from excel_processor import ExcelProcessor
+from pdf_exporter import export_sheets_to_pdf, list_sheet_names, preview_sheet, print_sheets
 
 
 class ProcessorWorker(QObject):
@@ -65,8 +69,72 @@ class ProcessorWorker(QObject):
         self.finished.emit(str(output_path), results)
 
 
+class PdfExportWorker(QObject):
+    progress = pyqtSignal(int, str)
+    log = pyqtSignal(str)
+    finished = pyqtSignal(list)
+    failed = pyqtSignal(str)
+
+    def __init__(self, input_path: str, sheet_names: list[str], output_dir: str) -> None:
+        super().__init__()
+        self.input_path = input_path
+        self.sheet_names = sheet_names
+        self.output_dir = output_dir
+
+    def run(self) -> None:
+        try:
+            output_paths = export_sheets_to_pdf(
+                input_path=self.input_path,
+                sheet_names=self.sheet_names,
+                output_dir=self.output_dir,
+                progress_callback=self.progress.emit,
+                log_callback=self.log.emit,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit([str(path) for path in output_paths])
+
+
+class PrintWorker(QObject):
+    progress = pyqtSignal(int, str)
+    log = pyqtSignal(str)
+    finished = pyqtSignal(int)
+    failed = pyqtSignal(str)
+
+    def __init__(self, input_path: str, sheet_names: list[str]) -> None:
+        super().__init__()
+        self.input_path = input_path
+        self.sheet_names = sheet_names
+
+    def run(self) -> None:
+        try:
+            print_sheets(
+                input_path=self.input_path,
+                sheet_names=self.sheet_names,
+                progress_callback=self.progress.emit,
+                log_callback=self.log.emit,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+            return
+        self.finished.emit(len(self.sheet_names))
+
+
 class MainWindow(QMainWindow):
-    RESULT_HEADERS = ["Sheet", "Số cọc", "CĐ đỉnh", "LLV", "VX", "VL", "Trạng thái", "Ghi chú"]
+    RESULT_HEADERS = [
+        "Sheet",
+        "Số cọc",
+        "CĐ đỉnh",
+        "LLV",
+        "VX",
+        "VL",
+        "Cao độ đỉnh TT",
+        "Cao độ đáy TT",
+        "Chiều dài cọc TT",
+        "Trạng thái",
+        "Ghi chú",
+    ]
 
     def __init__(self) -> None:
         super().__init__()
@@ -76,6 +144,10 @@ class MainWindow(QMainWindow):
         self.last_output_path: str | None = None
         self.thread: QThread | None = None
         self.worker: ProcessorWorker | None = None
+        self.pdf_thread: QThread | None = None
+        self.pdf_worker: PdfExportWorker | None = None
+        self.print_thread: QThread | None = None
+        self.print_worker: PrintWorker | None = None
         self.input_paths: list[str] = []
 
         self.file_edit = QLineEdit()
@@ -86,6 +158,18 @@ class MainWindow(QMainWindow):
         self.drill_length_spin.setDecimals(2)
         self.drill_length_spin.setValue(DEFAULT_CONFIG.default_drill_length_m)
         self.drill_length_spin.setSuffix(" m")
+        self.design_top_spin = QDoubleSpinBox()
+        self.design_top_spin.setRange(-9999.0, 9999.0)
+        self.design_top_spin.setDecimals(2)
+        self.design_top_spin.setValue(DEFAULT_CONFIG.default_design_top_elevation)
+        self.design_bottom_spin = QDoubleSpinBox()
+        self.design_bottom_spin.setRange(-9999.0, 9999.0)
+        self.design_bottom_spin.setDecimals(2)
+        self.design_bottom_spin.setValue(DEFAULT_CONFIG.default_design_bottom_elevation)
+        self.llv_threshold_spin = QDoubleSpinBox()
+        self.llv_threshold_spin.setRange(0.0, 999999.0)
+        self.llv_threshold_spin.setDecimals(2)
+        self.llv_threshold_spin.setValue(DEFAULT_CONFIG.flow_min_for_llv)
 
         self.create_summary_checkbox = QCheckBox("Tạo sheet tổng hợp")
         self.create_summary_checkbox.setChecked(DEFAULT_CONFIG.create_summary_sheet)
@@ -93,7 +177,7 @@ class MainWindow(QMainWindow):
         self.highlight_checkbox.setChecked(DEFAULT_CONFIG.highlight_ranges)
         self.no_overwrite_checkbox = QCheckBox("Không ghi đè file gốc")
         self.no_overwrite_checkbox.setChecked(DEFAULT_CONFIG.do_not_overwrite_original)
-        self.include_equal_checkbox = QCheckBox("Tính cả giá trị lưu lượng đoạn = 1")
+        self.include_equal_checkbox = QCheckBox("Tính cả lưu lượng bằng ngưỡng")
         self.include_equal_checkbox.setChecked(DEFAULT_CONFIG.include_flow_equal_threshold)
 
         self.process_button = QPushButton("Phân tích & Xuất file")
@@ -105,6 +189,18 @@ class MainWindow(QMainWindow):
         self.result_table.horizontalHeader().setStretchLastSection(True)
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
+
+        self.pdf_file_edit = QLineEdit()
+        self.pdf_file_edit.setReadOnly(True)
+        self.pdf_output_edit = QLineEdit(str(Path.cwd()))
+        self.pdf_sheet_list = QListWidget()
+        self.pdf_sheet_list.setMinimumHeight(120)
+        self.pdf_load_button = QPushButton("Tải sheet")
+        self.pdf_select_all_button = QPushButton("Chọn tất cả")
+        self.pdf_clear_button = QPushButton("Bỏ chọn")
+        self.pdf_preview_button = QPushButton("Xem trước sheet")
+        self.pdf_export_button = QPushButton("Xuất PDF")
+        self.pdf_print_button = QPushButton("In sheet đã chọn")
 
         self._build_ui()
         self._connect_signals()
@@ -133,12 +229,19 @@ class MainWindow(QMainWindow):
         form_layout.addWidget(file_button, 0, 2)
         form_layout.addWidget(csv_folder_button, 0, 3)
 
-        form_layout.addWidget(QLabel("Độ dài mũi khoan:"), 1, 0)
+        form_layout.addWidget(QLabel("Độ dài mũi khoan/cọc TK:"), 1, 0)
         form_layout.addWidget(self.drill_length_spin, 1, 1)
+        form_layout.addWidget(QLabel("Cao độ đỉnh thiết kế:"), 1, 2)
+        form_layout.addWidget(self.design_top_spin, 1, 3)
 
-        form_layout.addWidget(QLabel("Thư mục lưu:"), 2, 0)
-        form_layout.addWidget(self.output_edit, 2, 1)
-        form_layout.addWidget(output_button, 2, 2)
+        form_layout.addWidget(QLabel("Cao độ đáy thiết kế:"), 2, 0)
+        form_layout.addWidget(self.design_bottom_spin, 2, 1)
+        form_layout.addWidget(QLabel("Ngưỡng LLV:"), 2, 2)
+        form_layout.addWidget(self.llv_threshold_spin, 2, 3)
+
+        form_layout.addWidget(QLabel("Thư mục lưu:"), 3, 0)
+        form_layout.addWidget(self.output_edit, 3, 1)
+        form_layout.addWidget(output_button, 3, 2)
 
         options_layout = QHBoxLayout()
         options_layout.addWidget(self.create_summary_checkbox)
@@ -158,12 +261,53 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self.progress_bar)
         root_layout.addWidget(QLabel("Bảng kết quả:"))
         root_layout.addWidget(self.result_table, stretch=2)
+        root_layout.addWidget(self._build_pdf_export_group(), stretch=1)
         root_layout.addWidget(QLabel("Log:"))
         root_layout.addWidget(self.log_edit, stretch=1)
+
+    def _build_pdf_export_group(self) -> QGroupBox:
+        group = QGroupBox("Tool xuất PDF theo sheet")
+        layout = QVBoxLayout(group)
+        form_layout = QGridLayout()
+
+        pdf_file_button = QPushButton("Chọn Excel")
+        pdf_file_button.clicked.connect(self.choose_pdf_file)
+        self.pdf_file_button = pdf_file_button
+
+        pdf_output_button = QPushButton("Chọn thư mục")
+        pdf_output_button.clicked.connect(self.choose_pdf_output_dir)
+        self.pdf_output_button = pdf_output_button
+
+        form_layout.addWidget(QLabel("File Excel:"), 0, 0)
+        form_layout.addWidget(self.pdf_file_edit, 0, 1)
+        form_layout.addWidget(pdf_file_button, 0, 2)
+        form_layout.addWidget(self.pdf_load_button, 0, 3)
+        form_layout.addWidget(QLabel("Thư mục PDF:"), 1, 0)
+        form_layout.addWidget(self.pdf_output_edit, 1, 1)
+        form_layout.addWidget(pdf_output_button, 1, 2)
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.pdf_select_all_button)
+        button_layout.addWidget(self.pdf_clear_button)
+        button_layout.addWidget(self.pdf_preview_button)
+        button_layout.addWidget(self.pdf_export_button)
+        button_layout.addWidget(self.pdf_print_button)
+        button_layout.addStretch(1)
+
+        layout.addLayout(form_layout)
+        layout.addWidget(self.pdf_sheet_list)
+        layout.addLayout(button_layout)
+        return group
 
     def _connect_signals(self) -> None:
         self.process_button.clicked.connect(self.start_processing)
         self.open_output_button.clicked.connect(self.open_output_file)
+        self.pdf_load_button.clicked.connect(self.load_pdf_sheets)
+        self.pdf_select_all_button.clicked.connect(lambda: self.set_pdf_sheets_checked(True))
+        self.pdf_clear_button.clicked.connect(lambda: self.set_pdf_sheets_checked(False))
+        self.pdf_preview_button.clicked.connect(self.preview_selected_pdf_sheet)
+        self.pdf_export_button.clicked.connect(self.start_pdf_export)
+        self.pdf_print_button.clicked.connect(self.start_direct_print)
 
     def choose_file(self) -> None:
         file_paths, _ = QFileDialog.getOpenFileNames(
@@ -211,6 +355,9 @@ class MainWindow(QMainWindow):
 
         runtime_config = clone_config()
         runtime_config.default_drill_length_m = self.drill_length_spin.value()
+        runtime_config.default_design_top_elevation = self.design_top_spin.value()
+        runtime_config.default_design_bottom_elevation = self.design_bottom_spin.value()
+        runtime_config.flow_min_for_llv = self.llv_threshold_spin.value()
         runtime_config.create_summary_sheet = self.create_summary_checkbox.isChecked()
         runtime_config.highlight_ranges = self.highlight_checkbox.isChecked()
         runtime_config.do_not_overwrite_original = self.no_overwrite_checkbox.isChecked()
@@ -255,6 +402,16 @@ class MainWindow(QMainWindow):
         self.csv_folder_button.setEnabled(not busy)
         self.output_button.setEnabled(not busy)
 
+    def _set_pdf_busy(self, busy: bool) -> None:
+        self.pdf_file_button.setEnabled(not busy)
+        self.pdf_output_button.setEnabled(not busy)
+        self.pdf_load_button.setEnabled(not busy)
+        self.pdf_select_all_button.setEnabled(not busy)
+        self.pdf_clear_button.setEnabled(not busy)
+        self.pdf_preview_button.setEnabled(not busy)
+        self.pdf_export_button.setEnabled(not busy)
+        self.pdf_print_button.setEnabled(not busy)
+
     def on_progress(self, percent: int, message: str) -> None:
         self.progress_bar.setValue(percent)
         if message:
@@ -297,3 +454,147 @@ class MainWindow(QMainWindow):
             return input_paths[0]
         first_path = Path(input_paths[0])
         return f"{len(input_paths)} file CSV - {first_path.parent}"
+
+    def choose_pdf_file(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Chọn file Excel để xuất PDF",
+            str(Path.cwd()),
+            "Excel Files (*.xlsx)",
+        )
+        if not file_path:
+            return
+        self.pdf_file_edit.setText(file_path)
+        if not self.pdf_output_edit.text().strip():
+            self.pdf_output_edit.setText(str(Path(file_path).parent))
+        self.load_pdf_sheets()
+
+    def choose_pdf_output_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu PDF", self.pdf_output_edit.text().strip() or str(Path.cwd()))
+        if folder:
+            self.pdf_output_edit.setText(folder)
+
+    def load_pdf_sheets(self) -> None:
+        file_path = self.pdf_file_edit.text().strip()
+        if not file_path:
+            QMessageBox.warning(self, "Thiếu file", "Hãy chọn file Excel để tải danh sách sheet.")
+            return
+        if Path(file_path).suffix.lower() != ".xlsx" or not Path(file_path).exists():
+            QMessageBox.warning(self, "File không hợp lệ", "File xuất PDF phải là file .xlsx đang tồn tại.")
+            return
+        try:
+            sheet_names = list_sheet_names(file_path)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Lỗi đọc sheet", str(exc))
+            return
+        self.pdf_sheet_list.clear()
+        for sheet_name in sheet_names:
+            item = QListWidgetItem(sheet_name)
+            item.setCheckState(Qt.Checked)
+            self.pdf_sheet_list.addItem(item)
+        self.append_log(f"Đã tải {len(sheet_names)} sheet từ file PDF input.")
+
+    def set_pdf_sheets_checked(self, checked: bool) -> None:
+        state = Qt.Checked if checked else Qt.Unchecked
+        for row_idx in range(self.pdf_sheet_list.count()):
+            self.pdf_sheet_list.item(row_idx).setCheckState(state)
+
+    def selected_pdf_sheets(self) -> list[str]:
+        selected: list[str] = []
+        for row_idx in range(self.pdf_sheet_list.count()):
+            item = self.pdf_sheet_list.item(row_idx)
+            if item.checkState() == Qt.Checked:
+                selected.append(item.text())
+        return selected
+
+    def preview_selected_pdf_sheet(self) -> None:
+        file_path = self.pdf_file_edit.text().strip()
+        sheet_names = self.selected_pdf_sheets()
+        if not file_path or not sheet_names:
+            QMessageBox.warning(self, "Thiếu thông tin", "Hãy chọn file Excel và ít nhất một sheet để xem trước.")
+            return
+        try:
+            preview_sheet(file_path, sheet_names[0])
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Không xem trước được", str(exc))
+
+    def start_pdf_export(self) -> None:
+        file_path = self.pdf_file_edit.text().strip()
+        output_dir = self.pdf_output_edit.text().strip()
+        sheet_names = self.selected_pdf_sheets()
+        if not file_path or Path(file_path).suffix.lower() != ".xlsx" or not Path(file_path).exists():
+            QMessageBox.warning(self, "File không hợp lệ", "Hãy chọn file Excel .xlsx để xuất PDF.")
+            return
+        if not sheet_names:
+            QMessageBox.warning(self, "Thiếu sheet", "Hãy chọn ít nhất một sheet để xuất PDF.")
+            return
+        if not output_dir or not Path(output_dir).exists():
+            QMessageBox.warning(self, "Thư mục không hợp lệ", "Hãy chọn thư mục lưu PDF đang tồn tại.")
+            return
+
+        self.progress_bar.setValue(0)
+        self._set_pdf_busy(True)
+        self.pdf_thread = QThread(self)
+        self.pdf_worker = PdfExportWorker(file_path, sheet_names, output_dir)
+        self.pdf_worker.moveToThread(self.pdf_thread)
+        self.pdf_thread.started.connect(self.pdf_worker.run)
+        self.pdf_worker.progress.connect(self.on_progress)
+        self.pdf_worker.log.connect(self.append_log)
+        self.pdf_worker.finished.connect(self.on_pdf_finished)
+        self.pdf_worker.failed.connect(self.on_pdf_failed)
+        self.pdf_worker.finished.connect(self.pdf_thread.quit)
+        self.pdf_worker.failed.connect(self.pdf_thread.quit)
+        self.pdf_thread.finished.connect(self.pdf_thread.deleteLater)
+        self.pdf_thread.start()
+
+    def start_direct_print(self) -> None:
+        file_path = self.pdf_file_edit.text().strip()
+        sheet_names = self.selected_pdf_sheets()
+        if not file_path or Path(file_path).suffix.lower() != ".xlsx" or not Path(file_path).exists():
+            QMessageBox.warning(self, "File không hợp lệ", "Hãy chọn file Excel .xlsx để in.")
+            return
+        if not sheet_names:
+            QMessageBox.warning(self, "Thiếu sheet", "Hãy chọn ít nhất một sheet để in.")
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Xác nhận in",
+            f"Gửi {len(sheet_names)} sheet tới máy in mặc định?",
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        self.progress_bar.setValue(0)
+        self._set_pdf_busy(True)
+        self.print_thread = QThread(self)
+        self.print_worker = PrintWorker(file_path, sheet_names)
+        self.print_worker.moveToThread(self.print_thread)
+        self.print_thread.started.connect(self.print_worker.run)
+        self.print_worker.progress.connect(self.on_progress)
+        self.print_worker.log.connect(self.append_log)
+        self.print_worker.finished.connect(self.on_print_finished)
+        self.print_worker.failed.connect(self.on_print_failed)
+        self.print_worker.finished.connect(self.print_thread.quit)
+        self.print_worker.failed.connect(self.print_thread.quit)
+        self.print_thread.finished.connect(self.print_thread.deleteLater)
+        self.print_thread.start()
+
+    def on_pdf_finished(self, output_paths: list) -> None:
+        self.progress_bar.setValue(100)
+        self._set_pdf_busy(False)
+        QMessageBox.information(self, "Hoàn tất", f"Đã xuất {len(output_paths)} file PDF.")
+
+    def on_pdf_failed(self, error_message: str) -> None:
+        self._set_pdf_busy(False)
+        self.append_log(f"Lỗi xuất PDF: {error_message}")
+        QMessageBox.critical(self, "Lỗi xuất PDF", error_message)
+
+    def on_print_finished(self, printed_count: int) -> None:
+        self.progress_bar.setValue(100)
+        self._set_pdf_busy(False)
+        QMessageBox.information(self, "Hoàn tất", f"Đã gửi {printed_count} sheet tới máy in mặc định.")
+
+    def on_print_failed(self, error_message: str) -> None:
+        self._set_pdf_busy(False)
+        self.append_log(f"Lỗi in trực tiếp: {error_message}")
+        QMessageBox.critical(self, "Lỗi in trực tiếp", error_message)

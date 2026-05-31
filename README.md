@@ -6,6 +6,9 @@
 - `LLV`
 - `VX`
 - `VL`
+- `Cao độ đỉnh thực tế`
+- `Cao độ đáy thực tế`
+- `Chiều dài cọc thực tế`
 
 Sau khi xử lý, app sẽ:
 
@@ -14,6 +17,7 @@ Sau khi xử lý, app sẽ:
 - tạo sheet tổng hợp `Tong_hop`
 - xuất ra file Excel mới, không ghi đè file gốc
 - hỗ trợ xử lý trực tiếp 1 hoặc nhiều file CSV thô và gom ra 1 file Excel kết quả
+- hỗ trợ chọn sheet trong 1 file Excel và xuất từng sheet thành PDF riêng để in
 
 ## Cấu trúc project
 
@@ -57,9 +61,25 @@ python main.py
 
 1. Chọn file Excel `.xlsx`, hoặc chọn nhiều file CSV, hoặc chọn thư mục chứa CSV.
 2. Nhập độ dài mũi khoan, mặc định `3.00m`.
-3. Chọn thư mục lưu.
-4. Bấm `Phân tích & Xuất file`.
-5. Kiểm tra bảng kết quả trên giao diện và file Excel output.
+3. Nhập cao độ đỉnh thiết kế, cao độ đáy thiết kế và ngưỡng LLV nếu cần.
+4. Chọn thư mục lưu.
+5. Bấm `Phân tích & Xuất file`.
+6. Kiểm tra bảng kết quả trên giao diện và file Excel output.
+
+## Xuất PDF theo sheet
+
+1. Ở khu vực `Tool xuất PDF theo sheet`, chọn file Excel `.xlsx`.
+2. Bấm `Tải sheet` nếu danh sách sheet chưa hiện.
+3. Tick các sheet cần xuất.
+4. Chọn thư mục PDF.
+5. Bấm `Xuất PDF`.
+
+Tên file PDF được đặt theo tên sheet. Nút `Xem trước sheet` dùng Microsoft Excel để mở print preview cho sheet đầu tiên đang được tick. Nút `In sheet đã chọn` gửi các sheet đang tick tới máy in mặc định.
+
+Lưu ý:
+
+- Trên Windows, chức năng xuất PDF/xem trước/in trực tiếp ưu tiên Microsoft Excel qua `pywin32`.
+- Nếu không có Excel COM, app thử xuất PDF bằng LibreOffice headless nếu máy có lệnh `soffice` hoặc `libreoffice`.
 
 ## Xử lý CSV thô
 
@@ -127,6 +147,10 @@ dist/
 - `VX`: trung bình `Tốc độ Tời chính` trong pha đi xuống
 - `VL`: trung bình `Tốc độ Tời chính` trong pha đi lên
 - `LLV`: tổng `Lưu lượng đoạn` trong vùng phun chính
+- Mặc định LLV tính các giá trị `Lưu lượng đoạn >= 10`, vì giá trị nhỏ hơn 10 được xem là rỉ theo tài liệu V3.
+- `Cao độ đỉnh thực tế`: nếu bắt đầu phun sớm hơn CĐ đỉnh thì cộng phần chênh vào cao độ đỉnh thiết kế, ngược lại giữ cao độ đỉnh thiết kế.
+- `Cao độ đáy thực tế = Cao độ đáy thiết kế - (Khoan sâu thực tế - Độ sâu mục tiêu)`
+- `Chiều dài cọc thực tế = Cao độ đỉnh thực tế - Cao độ đáy thực tế`
 
 App tự dò header bảng dữ liệu. Nếu không dò được đầy đủ, app fallback theo format mẫu:
 

@@ -3,6 +3,10 @@ from PyInstaller.utils.hooks import collect_submodules
 
 hiddenimports = []
 hiddenimports += collect_submodules('PyQt5')
+try:
+    hiddenimports += collect_submodules('win32com')
+except Exception:
+    pass
 
 
 a = Analysis(
