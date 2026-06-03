@@ -148,6 +148,8 @@ dist/
 - `VL`: trung bình `Tốc độ Tời chính` trong pha đi lên
 - `LLV`: tổng `Lưu lượng đoạn` trong vùng phun chính
 - Mặc định LLV tính các giá trị `Lưu lượng đoạn >= 10`, vì giá trị nhỏ hơn 10 được xem là rỉ theo tài liệu V3.
+- Sau điều chỉnh VX/VL, VX bắt đầu từ dòng có `Lưu lượng tức thì >= ngưỡng LLV`; các dòng tốc độ tời bằng 0 tại đáy không đưa vào VX/VL.
+- VL bắt đầu sau cụm đáy, bỏ các dòng tốc độ tời bằng 0, và dừng khi về gần CĐ đỉnh hoặc khi tốc độ tời tăng mạnh trở lại.
 - `Cao độ đỉnh thực tế`: nếu bắt đầu phun sớm hơn CĐ đỉnh thì cộng phần chênh vào cao độ đỉnh thiết kế, ngược lại giữ cao độ đỉnh thiết kế.
 - `Cao độ đáy thực tế = Cao độ đáy thiết kế - (Khoan sâu thực tế - Độ sâu mục tiêu)`
 - `Chiều dài cọc thực tế = Cao độ đỉnh thực tế - Cao độ đáy thực tế`
@@ -155,5 +157,6 @@ dist/
 App tự dò header bảng dữ liệu. Nếu không dò được đầy đủ, app fallback theo format mẫu:
 
 - `C = Độ sâu`
+- `D = Lưu lượng tức thì`
 - `F = Lưu lượng đoạn`
 - `H = Tốc độ Tời chính`

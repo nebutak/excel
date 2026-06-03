@@ -24,9 +24,9 @@ def calculate_sheet(
 
     cd_dinh = round(target_depth - drill_length, 2)
     actual_drill_depth = max(row.depth for row in rows)
-    vx_start_idx = find_vx_start(rows, cd_dinh)
+    vx_start_idx = find_vx_start(rows, cd_dinh, config)
     vx_end_idx, vl_start_idx = split_down_up_phase(rows, actual_drill_depth, config)
-    vl_end_idx = find_vl_end(rows, cd_dinh, vl_start_idx)
+    vl_end_idx = find_vl_end(rows, cd_dinh, vl_start_idx, config)
 
     if vx_end_idx < vx_start_idx:
         raise CalculationError("Không xác định được vùng VX hợp lệ.")
@@ -81,7 +81,11 @@ def calculate_sheet(
     )
 
 
-def find_vx_start(rows: list[TableRow], cd_dinh: float) -> int:
+def find_vx_start(rows: list[TableRow], cd_dinh: float, config: RuntimeConfig) -> int:
+    for idx, row in enumerate(rows):
+        if _is_main_instant_flow(row.instant_flow, config):
+            return idx
+
     vx_start = 0
     for idx in range(len(rows)):
         current_depth = rows[idx].depth
@@ -104,7 +108,7 @@ def split_down_up_phase(
     ]
     if not exact_peak_indexes:
         peak_index = max(range(len(rows)), key=lambda idx: rows[idx].depth)
-        return split_single_peak(rows, peak_index, config)
+        return split_peak_cluster(rows, [peak_index], config)
 
     peak_cluster = [exact_peak_indexes[0]]
     for idx in exact_peak_indexes[1:]:
@@ -113,42 +117,65 @@ def split_down_up_phase(
         else:
             break
 
-    if len(peak_cluster) == 1:
-        return split_single_peak(rows, peak_cluster[0], config)
-
-    first_peak = peak_cluster[0]
-    last_peak = peak_cluster[-1]
-    previous_near_peak = (
-        first_peak > 0
-        and round(max_depth - rows[first_peak - 1].depth, 6) < config.depth_tolerance
-        and rows[first_peak].main_hoist_speed <= config.speed_zero_threshold
-    )
-    if previous_near_peak:
-        vx_end = first_peak - 1
-        vl_start = first_peak
-    else:
-        vx_end = max(last_peak - 1, 0)
-        vl_start = last_peak
-    return vx_end, vl_start
+    return split_peak_cluster(rows, peak_cluster, config)
 
 
-def split_single_peak(
+def split_peak_cluster(
     rows: list[TableRow],
-    peak_index: int,
+    peak_cluster: list[int],
     config: RuntimeConfig,
 ) -> tuple[int, int]:
-    speed = rows[peak_index].main_hoist_speed
-    if speed <= config.speed_zero_threshold:
-        return max(peak_index - 1, 0), peak_index
-    return peak_index, min(peak_index + 1, len(rows) - 1)
+    first_peak = peak_cluster[0]
+    last_peak = peak_cluster[-1]
+
+    vx_end = last_peak
+    for idx in peak_cluster:
+        if rows[idx].main_hoist_speed <= config.speed_zero_threshold:
+            vx_end = max(idx - 1, 0)
+            break
+
+    vl_start = min(last_peak + 1, len(rows) - 1)
+    while (
+        vl_start < len(rows) - 1
+        and rows[vl_start].main_hoist_speed <= config.speed_zero_threshold
+    ):
+        vl_start += 1
+
+    if vl_start <= vx_end and last_peak < len(rows) - 1:
+        vl_start = last_peak + 1
+    if vx_end < first_peak and first_peak > 0:
+        vx_end = first_peak - 1
+    return vx_end, min(vl_start, len(rows) - 1)
 
 
-def find_vl_end(rows: list[TableRow], cd_dinh: float, vl_start_idx: int) -> int:
+def find_vl_end(
+    rows: list[TableRow],
+    cd_dinh: float,
+    vl_start_idx: int,
+    config: RuntimeConfig,
+) -> int:
+    best_idx = vl_start_idx
     for idx in range(vl_start_idx, len(rows)):
         depth = rows[idx].depth
-        if isclose(depth, cd_dinh, abs_tol=0.02) or depth <= cd_dinh:
+        if isclose(depth, cd_dinh, abs_tol=0.01) or depth <= cd_dinh:
             return idx
-    return min(range(vl_start_idx, len(rows)), key=lambda idx: abs(rows[idx].depth - cd_dinh))
+        if idx > vl_start_idx:
+            previous_speed = rows[idx - 1].main_hoist_speed
+            current_speed = rows[idx].main_hoist_speed
+            if (
+                previous_speed <= config.vl_speed_increase_threshold
+                and current_speed > config.vl_speed_increase_threshold
+            ):
+                return idx - 1
+        if abs(depth - cd_dinh) < abs(rows[best_idx].depth - cd_dinh):
+            best_idx = idx
+    return best_idx
+
+
+def _is_main_instant_flow(value: float, config: RuntimeConfig) -> bool:
+    if config.include_flow_equal_threshold:
+        return value >= config.flow_min_for_llv
+    return value > config.flow_min_for_llv
 
 
 def calculate_llv_range(

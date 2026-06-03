@@ -301,11 +301,13 @@ class ExcelProcessor:
                 continue
             blank_streak = 0
             flow_value = parse_number(worksheet.cell(row_idx, layout.flow_col).value) or 0.0
+            instant_flow_value = parse_number(worksheet.cell(row_idx, layout.instant_flow_col).value) or 0.0
             speed_value = parse_number(worksheet.cell(row_idx, layout.speed_col).value) or 0.0
             rows.append(
                 TableRow(
                     excel_row=row_idx,
                     depth=depth,
+                    instant_flow=instant_flow_value,
                     flow_segment=flow_value,
                     main_hoist_speed=speed_value,
                 )

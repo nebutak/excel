@@ -4,6 +4,7 @@
   "default_design_bottom_elevation": -13.5,
   "depth_tolerance": 0.02,
   "speed_zero_threshold": 0.05,
+  "vl_speed_increase_threshold": 1.5,
   "flow_min_for_llv": 10.0,
   "sum_only_values_greater_than_threshold": true,
   "include_flow_equal_threshold": true,
@@ -26,6 +27,7 @@
   },
   "fallback_columns": {
     "depth": "C",
+    "instant_flow": "D",
     "flow_segment": "F",
     "main_hoist_speed": "H"
   },

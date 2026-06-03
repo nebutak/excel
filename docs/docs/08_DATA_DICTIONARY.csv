@@ -5,6 +5,7 @@ diameter,Đường kính cọc,Không,Top rows,Đường kính cọc,Parse từ 
 header_drill_depth,Khoan sâu,Không,Top rows,Khoan sâu ghi trong header,Có thể khác max độ sâu thực tế
 actual_drill_depth,Khoan sâu thực tế,Có,Max cột Độ sâu,Độ sâu lớn nhất trong dữ liệu,Nên dùng để nhận diện peak
 depth,Độ sâu,Có,Cột C,Độ sâu từng thời điểm,Dùng tính VX/VL
+instant_flow,Lưu lượng tức thì,Có,Cột D,Lưu lượng tức thời,Dùng nhận diện điểm bắt đầu VX sau điều chỉnh
 flow_segment,Lưu lượng đoạn,Có,Cột F,Lưu lượng từng đoạn,Dùng tính LLV
 main_hoist_speed,Tốc độ Tời chính,Có,Cột H,Tốc độ tời chính,Dùng tính VX/VL
 cd_dinh,CĐ đỉnh,Có,Kết quả bên phải,Target depth - drill length,Tính lại

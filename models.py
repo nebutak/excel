@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 class TableRow:
     excel_row: int
     depth: float
+    instant_flow: float
     flow_segment: float
     main_hoist_speed: float
 
@@ -29,6 +30,7 @@ class SheetMetadata:
 class TableLayout:
     header_row: int
     depth_col: int
+    instant_flow_col: int
     flow_col: int
     speed_col: int
     last_data_col: int

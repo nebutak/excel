@@ -10,6 +10,7 @@ class RuntimeConfig:
     default_design_bottom_elevation: float = -13.5
     depth_tolerance: float = 0.02
     speed_zero_threshold: float = 0.05
+    vl_speed_increase_threshold: float = 1.5
     flow_min_for_llv: float = 10.0
     sum_only_values_greater_than_threshold: bool = True
     include_flow_equal_threshold: bool = True
@@ -37,6 +38,7 @@ class RuntimeConfig:
     fallback_columns: dict[str, str] = field(
         default_factory=lambda: {
             "depth": "C",
+            "instant_flow": "D",
             "flow_segment": "F",
             "main_hoist_speed": "H",
         }

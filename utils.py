@@ -14,6 +14,7 @@ NUMBER_PATTERN = re.compile(r"-?\d+(?:[\.,]\d+)?")
 
 HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "depth": ("do sau",),
+    "instant_flow": ("luu luong tuc thi",),
     "flow_segment": ("luu luong doan",),
     "main_hoist_speed": ("toc do toi chinh",),
 }
@@ -99,6 +100,7 @@ def detect_table_layout(worksheet: Worksheet, config: RuntimeConfig) -> TableLay
         return TableLayout(
             header_row=10,
             depth_col=column_index_from_string(config.fallback_columns["depth"]),
+            instant_flow_col=column_index_from_string(config.fallback_columns["instant_flow"]),
             flow_col=column_index_from_string(config.fallback_columns["flow_segment"]),
             speed_col=column_index_from_string(config.fallback_columns["main_hoist_speed"]),
             last_data_col=13,
@@ -116,10 +118,12 @@ def detect_table_layout(worksheet: Worksheet, config: RuntimeConfig) -> TableLay
             if field_name not in matched and _match_alias(normalized_value, aliases):
                 matched[field_name] = col_idx
 
-    if len(matched) == 3:
+    required_fields = {"depth", "flow_segment", "main_hoist_speed"}
+    if required_fields.issubset(matched):
         return TableLayout(
             header_row=header_row,
             depth_col=matched["depth"],
+            instant_flow_col=matched.get("instant_flow", column_index_from_string(config.fallback_columns["instant_flow"])),
             flow_col=matched["flow_segment"],
             speed_col=matched["main_hoist_speed"],
             last_data_col=last_data_col,
@@ -129,6 +133,7 @@ def detect_table_layout(worksheet: Worksheet, config: RuntimeConfig) -> TableLay
     return TableLayout(
         header_row=header_row,
         depth_col=matched.get("depth", column_index_from_string(config.fallback_columns["depth"])),
+        instant_flow_col=matched.get("instant_flow", column_index_from_string(config.fallback_columns["instant_flow"])),
         flow_col=matched.get("flow_segment", column_index_from_string(config.fallback_columns["flow_segment"])),
         speed_col=matched.get("main_hoist_speed", column_index_from_string(config.fallback_columns["main_hoist_speed"])),
         last_data_col=last_data_col,
